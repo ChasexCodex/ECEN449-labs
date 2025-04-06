@@ -32,7 +32,7 @@ double apply_operation(double a, double b, Operation op);
 
 Operation map_operator(char op);
 
-double evaluate(std::string& expression);
+double evaluate(std::string expression);
 
 void delete_tree(ExpressionNode* node);
 

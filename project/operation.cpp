@@ -3,6 +3,11 @@
 #include <cstring>
 #include <iostream>
 #include <cmath>
+#include <map>
+
+using namespace std;
+
+Operation to_operation(std::string func);
 
 void delete_tree(ExpressionNode* node)
 {
@@ -31,9 +36,8 @@ Operation map_operator(char op)
 	}
 }
 
-double evaluate(std::string& expression)
-{
-	int open_parens = 0;
+void append_parentheses(std::string& expression) {
+    int open_parens = 0;
 	for (char c : expression) {
 		if (c == '(') open_parens++;
 		else if (c == ')') open_parens--;
@@ -41,15 +45,23 @@ double evaluate(std::string& expression)
 	while (open_parens-- > 0) {
 		expression += ')';
 	}
+}
 
+void substitute_pi(std::string& expression) {
     size_t pos = 0;
-    while ((pos = expression.find("pi", pos)) != std::string::npos) {
-        expression.replace(pos, 2, "3.14159265358979323846");
-        pos += 20;
+    while ((pos = expression.find("pi", pos)) != string::npos) {
+        expression.replace(pos, 2, "(3.14159265358979323846)");
+        pos += 22;
     }
+}
 
-	std::stack<Operation> operators;
-	std::stack<ExpressionNode*> operands;
+double evaluate(std::string expression)
+{
+	append_parentheses(expression);
+    substitute_pi(expression);
+
+	stack<Operation> operators;
+	stack<ExpressionNode*> operands;
 
 	auto push_node = [&]()
     {
@@ -57,8 +69,7 @@ double evaluate(std::string& expression)
         node->op = operators.top();
         operators.pop();
 
-        if (node->op == Operation::Sin || node->op == Operation::Cos || 
-            node->op == Operation::Tan || node->op == Operation::Sqrt)
+        if (precedence(node->op) == 4)
         {
             node->left = operands.top(); operands.pop();
             node->right = nullptr;
@@ -70,6 +81,7 @@ double evaluate(std::string& expression)
         }
 
         operands.push(node);
+        return false;
     };
 
 	auto push_operator = [&](Operation op)
@@ -91,9 +103,9 @@ double evaluate(std::string& expression)
 
 	for (size_t i = 0; i < expression.size(); i++)
 	{
-		if (std::isdigit(expression[i]) || (expression[i] == '.' && i + 1 < expression.size() && std::isdigit(expression[i + 1])) || (expression[i] == '-' && i + 1 < expression.size() && (std::isdigit(expression[i + 1]) || expression[i + 1] == '.') && (i == 0 || (!std::isdigit(expression[i - 1]) && expression[i - 1] != ')'))))
+		if (isdigit(expression[i]) || (expression[i] == '.' && i + 1 < expression.size() && isdigit(expression[i + 1])) || (expression[i] == '-' && i + 1 < expression.size() && (isdigit(expression[i + 1]) || expression[i + 1] == '.') && (i == 0 || (!isdigit(expression[i - 1]) && expression[i - 1] != ')'))))
 		{
-			std::string number_str;
+			string number_str;
 			bool decimal_found = false;
 
 			if (expression[i] == '-')
@@ -109,7 +121,7 @@ double evaluate(std::string& expression)
 				i++;
 			}
 
-			while (i < expression.size() && (std::isdigit(expression[i]) || expression[i] == '.'))
+			while (i < expression.size() && (isdigit(expression[i]) || expression[i] == '.'))
 			{
 				if (expression[i] == '.')
 				{
@@ -133,23 +145,22 @@ double evaluate(std::string& expression)
 			}
 
 			i--; // step back for main loop
-			double value = std::stod(number_str);
+			double value = stod(number_str);
 			push_value(value);
-		} else if (std::isalpha(expression[i])) {
-            std::string func;
-            while (i < expression.size() && std::isalpha(expression[i])) {
+		} else if (isalpha(expression[i])) {
+            string func;
+            while (i < expression.size() && isalpha(expression[i])) {
                 func += expression[i++];
             }
             i--;
 
-            Operation op = Operation::None;
-            if (func == "sin") op = Operation::Sin;
-            else if (func == "cos") op = Operation::Cos;
-            else if (func == "tan") op = Operation::Tan;
-            else if (func == "sqrt") op = Operation::Sqrt;
-            else return NAN;
+            Operation op = to_operation(func);
+            if (op == Operation::None) { // unrecognized input
+                printf("Unrecognized function %s\n", func.c_str());
+                return NAN;
+            }
 
-            operators.push(op);  // push the function op
+            operators.push(op); // push the function op
         }
 		else if (std::isspace(expression[i]))
 		{
@@ -169,7 +180,7 @@ double evaluate(std::string& expression)
                 ExpressionNode* node = new ExpressionNode();
                 node->op = op;
 
-                if (op == Operation::Sin || op == Operation::Cos || op == Operation::Tan || op == Operation::Sqrt)
+                if (precedence(op))
                 {                    
 			        node->right = nullptr;
                 }
@@ -197,6 +208,18 @@ double evaluate(std::string& expression)
 	double result = root->evaluate();
 	delete_tree(root);
 	return result;
+}
+
+Operation to_operation(std::string func) {
+    static const std::map<std::string, Operation> opMap = {
+        {"sin", Operation::Sin},
+        {"cos", Operation::Cos},
+        {"tan", Operation::Tan},
+        {"sqrt", Operation::Sqrt},
+    };
+
+    auto it = opMap.find(func);
+    return (it != opMap.end()) ? it->second : Operation::None;
 }
 
 double apply_operation(double a, double b, Operation op)
@@ -234,7 +257,7 @@ int precedence(Operation op)
 	case Operation::Cos:
 	case Operation::Tan:
 	case Operation::Sqrt:
-		return 4;
+		return 4; // this value is also used to check if the operation is a function
 	default:
 		return 0;
 	}
@@ -244,8 +267,8 @@ double ExpressionNode::evaluate()
 {
 	if (op == Operation::None) return value;
 
-	if (op == Operation::Sin || op == Operation::Cos || op == Operation::Tan || op == Operation::Sqrt)
-		return apply_operation(left->evaluate(), 0, op);  // right is ignored
+	if (precedence(op) == 4) // this a function
+		return apply_operation(left->evaluate(), 0, op); // right is ignored
 
 	return apply_operation(left->evaluate(), right->evaluate(), op);
 }
