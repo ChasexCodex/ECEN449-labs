@@ -1,6 +1,8 @@
 #ifndef ECEN449_MAIN_H
 #define ECEN449_MAIN_H
 
+#include <string>
+
 // config constants
 #define ENTER '\n'
 #define RETURN '\r'
@@ -14,20 +16,19 @@
 #define IDLE_TIMEOUT_CLEAR_DURATION 60s
 
 // UI
-void render_lcd();
+void render_lcd(std::string current_input);
 void display_result();
 
 // utility
-bool is_expression_input(char c);
 void check_input_alert();
-void blink_invalid_key();
+void blink_invalid();
 void check_decimal_points_change();
 
 // input handling
 void handle_input(char c);
 void backspace();
 void enter();
-void clear_input();
+void clear_screen();
 void store_result();
 void use_result();
 void invalid_expression();
