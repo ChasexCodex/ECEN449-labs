@@ -3,146 +3,157 @@
 #include <set>
 #include <map>
 #include <numeric>
+#include <stack>
+#include <algorithm>
 
+using namespace std;
 
-enum AllowedInput
+InputType InputState::get_input_type(const char c)
 {
-	NUMBER = 1 << 0,
-	DOT = 1 << 1,
-	BINARY_OPERATOR = 1 << 2,
-	FUNCTION = 1 << 3,
-	LEFT_BRACKET = 1 << 4,
-	RIGHT_BRACKET = 1 << 5,
-	CONSTANT = 1 << 6,
-	MINUS = 1 << 7,
-	OPERATOR = MINUS | BINARY_OPERATOR,
-};
-
-bool is_expression_input(char c)
-{
-	return isdigit(c) || (string("+-*/^.()sincostansqrtpi").find(c) != std::string::npos);
+	if (isdigit(c)) return NUMBER;
+	if (c == '.') return DOT;
+	if (c == '-') return MINUS;
+	if (binary_operators.find(c) != string::npos) return BINARY_OP;
+	if (letters.find(c) != string::npos) return STRING;
+	if (c == '(') return LEFT_BRACKET;
+	if (c == ')') return RIGHT_BRACKET;
+	return INVALID;
 }
 
-bool is_valid_partial_expression(const string& current_input, const char c)
+void InputState::push_new_state(int new_state, bool right_bracket)
 {
-	const string binary_operators = "+*/^";
+	previous_states.push(current_state);
+	if (right_bracket) new_state &= ~(RIGHT_BRACKET * (bracket_stack == 0));
+	current_state = new_state;
+}
 
-	const set <string> functions = {
-			"sin", "cos", "tan", "sqrt"
-	};
+void InputState::push_new_string(const string& old_string, char c, bool clear)
+{
+	previous_strings.push(old_string);
+	if (clear) current_string.clear();
+	else current_string = old_string + c;
+}
 
-	const set <string> constants = {
-			"pi"
-	};
+void InputState::backspace()
+{
+	if (current_input.empty()) return;
 
-	// possible letters from functions and constants (mapped directly from functions and constants)
-	string function_letters = accumulate(functions.begin(), functions.end(), string{});
-	string constant_letters = accumulate(constants.begin(), constants.end(), string{});
-	string letters = function_letters + constant_letters;
+	char c = current_input.back();
+	current_input.pop_back();
+	current_state = previous_states.top();
+	previous_states.pop();
 
-	string current_function, current_constant;
-
-	int bracket_stack = 0;
-
-	// the input can start with any of these
-	const int new_expression = NUMBER | DOT | FUNCTION | LEFT_BRACKET | CONSTANT | MINUS;
-	int allowed_input = new_expression;
-
-	// the current_input is assumed to be valid
-	// we just need to set up the flags for the allowed next character
-	for (char input_letter: current_input)
+	if (!current_string.empty())
 	{
-		if (isdigit(input_letter))
-		{
-			allowed_input = RIGHT_BRACKET * (bracket_stack > 0);
-			allowed_input |= NUMBER | DOT | OPERATOR;
-		}
+		current_string.pop_back();
+		previous_strings.pop();
+	}
+	else if (isalpha(c))
+	{
+		current_string = previous_strings.top();
+		previous_strings.pop();
+	}
+}
 
-		else if (input_letter == '.')
-		{
-			allowed_input = RIGHT_BRACKET * (bracket_stack > 0);
-			allowed_input |= NUMBER | OPERATOR;
-		}
+ExpressionState InputState::validate_and_add(const char c)
+{
+	InputType input_type = get_input_type(c);
 
-		else if (binary_operators.find(input_letter) != string::npos)
-		{
-			current_constant.clear();
-			allowed_input |= NUMBER | FUNCTION | LEFT_BRACKET | CONSTANT | MINUS;
-		}
+	if (!(input_type & current_state)) return ExpressionState::INVALID_EXPRESSION;
 
-		else if (input_letter == '-')
-		{
-			current_constant.clear();
-			allowed_input = NUMBER | FUNCTION | LEFT_BRACKET | CONSTANT;
-		}
+	if (input_type == NUMBER)
+	{
+		current_input += c;
+		if ((current_state | MINUS) == NEW_EXPRESSION) push_new_state(NUMBER_NO_DOT, true);
+		else if ((current_state | MINUS) == NUMBER_NO_DOT || (current_state | MINUS | RIGHT_BRACKET) == NUMBER_DOT_MIDDLE)
+			push_new_state(current_state, true);
+		else if (current_state == NUMBER_DOT_START) push_new_state(NUMBER_DOT_MIDDLE, true);
 
-		// if the character is part of a function or constant, we can only have the remaining letters of that or a left bracket
-		else if (letters.find(input_letter) != string::npos)
+		return ExpressionState::VALID_EXPRESSION;
+	}
+	else if (input_type == DOT)
+	{
+		current_input += c;
+		if ((current_state | MINUS) == NEW_EXPRESSION)
 		{
-			allowed_input = 0;
-			if (function_letters.find(input_letter) != string::npos)
-			{
-				current_function += input_letter;
-				allowed_input |= FUNCTION;
-				if (functions.find(current_function) != functions.end())
-				{
-					allowed_input |= LEFT_BRACKET;
-				}
-			}
-			if (constant_letters.find(input_letter) != string::npos)
-			{
-				current_constant += input_letter;
-				allowed_input |= CONSTANT;
-				if (constants.find(current_constant) != constants.end())
-				{
-					allowed_input |= OPERATOR | RIGHT_BRACKET * (bracket_stack > 0);
-				}
-			}
+			push_new_state(NUMBER_DOT_START);
+			return ExpressionState::PARTIALLY_VALID_EXPRESSION;
 		}
-
-		else if (input_letter == '(')
+		if ((current_state | MINUS) == (NUMBER_NO_DOT & ~(RIGHT_BRACKET * (bracket_stack == 0))))
 		{
-			bracket_stack++;
-			current_function.clear();
-			allowed_input = new_expression | RIGHT_BRACKET;
-		}
-		else if (input_letter == ')')
-		{
-			bracket_stack--;
-			allowed_input = OPERATOR;
-			if (bracket_stack > 0)
-			{
-				allowed_input = OPERATOR | RIGHT_BRACKET;
-			}
+			push_new_state(NUMBER_DOT_MIDDLE, true);
+			return ExpressionState::VALID_EXPRESSION;
 		}
 	}
-
-	auto is_part_of_function = [&](const string& function)
+	else if (input_type == LEFT_BRACKET)
 	{
-		return function.find(current_function + c) == 0;
-	};
-
-	auto is_part_of_constant = [&](const string& constant)
+		bracket_stack++;
+		push_new_state(NEW_EXPRESSION, true);
+		current_input += c;
+		return ExpressionState::PARTIALLY_VALID_EXPRESSION;
+	}
+	else if (input_type == RIGHT_BRACKET)
 	{
-		return constant.find(current_constant + c) == 0;
-	};
-
-	map<bool, int> condition_map{
-			{ isdigit(c),                                                      NUMBER },
-			{ c == '.',                                                        DOT },
-			{ binary_operators.find(c) != string::npos,                        BINARY_OPERATOR },
-			{ c == '-',                                                        MINUS },
-			{ c == '(',                                                        LEFT_BRACKET },
-			{ c == ')',                                                        RIGHT_BRACKET },
-			{ any_of(functions.begin(), functions.end(), is_part_of_function), FUNCTION },
-			{ any_of(constants.begin(), constants.end(), is_part_of_constant), CONSTANT },
-	};
-
-	auto true_condition = condition_map.find(true);
-	if (true_condition == condition_map.end())
+		if (bracket_stack == 0) return ExpressionState::INVALID_EXPRESSION;
+		bracket_stack--;
+		push_new_state(CONSTANT_MATCH_OR_EXPRESSION_FINISH, true);
+		current_input += c;
+		return ExpressionState::VALID_EXPRESSION;
+	}
+	else if (input_type == STRING)
 	{
-		return false;
+		auto is_part_of_function = [&](const string& function)
+		{
+			return function.find(current_string + c) == 0;
+		};
+
+		auto is_part_of_constant = [&](const string& constant)
+		{
+			return constant.find(current_string + c) == 0;
+		};
+
+		if (functions.find(current_string + c) != functions.end())
+		{
+			push_new_state(FUNCTION_MATCH);
+			push_new_string(current_string, c);
+		}
+		else if (constants.find(current_string + c) != constants.end())
+		{
+			push_new_state(CONSTANT_MATCH_OR_EXPRESSION_FINISH);
+			push_new_string(current_string, c);
+			current_input += c;
+			return ExpressionState::VALID_EXPRESSION;
+		}
+		else if (any_of(functions.begin(), functions.end(), is_part_of_function)
+				 || any_of(constants.begin(), constants.end(), is_part_of_constant))
+		{
+			push_new_state(STRING_NOMATCH);
+			push_new_string(current_string, c, false);
+		}
+		else return ExpressionState::INVALID_EXPRESSION;
+		current_input += c;
+		return ExpressionState::PARTIALLY_VALID_EXPRESSION;
+	}
+	else if (input_type & OPERATOR)
+	{
+		current_input += c;
+		push_new_state(NEW_EXPRESSION & ~(MINUS * (input_type == MINUS)));
+		return ExpressionState::PARTIALLY_VALID_EXPRESSION;
 	}
 
-	return true_condition->second & allowed_input;
+	printf("Should not be here: %c\n", c);
+	return ExpressionState::INVALID_EXPRESSION;
+}
+
+int InputState::length() {
+	return current_input.length();
+}
+
+void InputState::clear() {
+	current_state = NEW_EXPRESSION;
+	current_input.clear();
+	current_string.clear();
+	bracket_stack = 0;
+	while (!previous_states.empty()) previous_states.pop();
+	while (!previous_strings.empty()) previous_strings.pop();
 }

@@ -8,30 +8,42 @@
 #include <string>
 #include <sstream>
 
+#define ECEN449_DEBUG // enable to see output on the serial monitor as well
+#define F429 // the other board used to test this code
+
 // pin mappings
 C12832 lcd(D11, D13, D12, D7, D10); // the LCD panel
 BufferedSerial serial_port(USBTX, USBRX); // UART communication port
 
-// DigitalOut led(LED1); // was used for testing
+#ifdef F429
+DigitalOut led(LED1); // was used for testing
+#endif
+
 BusOut rgb_led(D5, D9, D8); // used for signaling max/bad input  
 AnalogIn pot(A0); // used to adjust decimal points
+
+#ifndef F429
+// must wrap in an `if` directive because it causes pin conflict on F429 board 
 InterruptIn joystick_up(A2); // used to store evaluated results
 InterruptIn joystick_down(A3); // used to insert previously evaluated results
+#endif
 
 // a timeout to clear the input after IDLE_TIMEOUT_CLEAR_DURATION
 Timeout idle_timeout;
 
-string input;
+InputState input_state;
 string previous_input;
 volatile bool read_flag = false;
 double result = 0;
 bool evaluated_flag = false; // used to indicate the expression is evaluated
+ExpressionState expr_state = ExpressionState::INVALID_EXPRESSION;
 volatile bool stored_flag = false; // used to indicate a result is stored
 double stored_result = 0;
 bool clear_flag = false;
 bool refresh_input_flag = false;
 bool invalid_flag = false;
 int decimal_points = 2; // decimal_points to display
+float last_pot_value = 0.0f; // used to stablize the readings
 
 // renders the input and result (if available)
 void render_lcd(string current_input) {
@@ -39,9 +51,9 @@ void render_lcd(string current_input) {
 	lcd.locate(0, 3); // change cursor
 	lcd.printf("%s\n", current_input.c_str()); // print number
 	
-    #if ECEN449_DEBUG
+#ifdef ECEN449_DEBUG
     printf("\x1B[2J\x1B[H%s\n", current_input.c_str());
-    #endif
+#endif
 
 	if (evaluated_flag) {
 		display_result();
@@ -49,18 +61,20 @@ void render_lcd(string current_input) {
 }
 
 void display_result() {
-	if (input.size() < MAX_LINE) {
+	if (input_state.length() < MAX_LINE) {
 		lcd.printf("\n");
 	}
 	char format[25];
-	sprintf(format, "%%.%df", decimal_points);
+	sprintf(format, "%%.%df\n", decimal_points);
 	lcd.printf(format, result);
-	printf("\x1B[2J\x1B[H%.2lf", result);
+#ifdef ECEN449_DEBUG
+	printf(format, result);
+#endif
 }
 
 // shows yellow if max input reached
 void check_input_alert() {
-	rgb_led = input.length() == MAX_INPUT ? 0b100 : 0b111;
+	rgb_led = input_state.length() == MAX_INPUT ? 0b100 : 0b111;
 }
 
 // blinks on invalid input
@@ -72,50 +86,59 @@ void blink_invalid() {
 }
 
 void check_decimal_points_change() {
-	int temp = (int)(pot.read() * MAX_DECIMALS);
-	if (decimal_points == temp) return;
+    float current_value = pot.read();
+    const float threshold = 0.05f; // adjust this based on your noise profile
 
-	decimal_points = temp;
-	render_lcd(previous_input);
+    if (fabs(current_value - last_pot_value) < threshold)
+        return;
+
+    last_pot_value = current_value;
+
+    int temp = (int)(current_value * MAX_DECIMALS);
+    if (decimal_points != temp) {
+        decimal_points = temp;
+        render_lcd(previous_input);
+    }
 }
 
 void handle_input(char c) {
 	evaluated_flag = false;
-	if (input.length() < MAX_INPUT) {
-		input += c;
-		render_lcd(input);
-	}
+	if (input_state.length() < MAX_INPUT) {
+		render_lcd(input_state.current_input);
+	} else {
+        input_state.backspace();
+    }
 	check_input_alert();
 }
 
 void backspace() {
 	evaluated_flag = false;
-	if (!input.empty()) {
-		input.pop_back();
-		render_lcd(input);
+	if (input_state.length() > 0) {
+        input_state.backspace();
+		render_lcd(input_state.current_input);
 	}
 	check_input_alert();
 }
 
 void enter() {
-	if (!input.empty()) {
-		result = evaluate(input);
+	if (input_state.length() > 0) {
+		result = evaluate(input_state.current_input);
 		if (isnan(result)) {
 			invalid_expression();
 		} else {
 			evaluated_flag = true;
-			render_lcd(input);
-			previous_input = input;
+			render_lcd(input_state.current_input);
+			previous_input = input_state.current_input;
 		}
 	}
-	input.clear();
+	input_state.clear();
 	check_input_alert();
 }
 
 void clear_screen() {
-	input.clear();
+	input_state.clear();
 	evaluated_flag = false;
-	render_lcd(input);
+	render_lcd(input_state.current_input);
 }
 
 void store_result() {
@@ -128,10 +151,12 @@ void store_result() {
 void use_result() {
 	if (!stored_flag) return;
 
-	stringstream s;
-	s << input << stored_result;
+	stringstream ss;
+	ss << input_state.current_input << stored_result;
 	stored_flag = false;
-	input = s.str();
+    string str = ss.str();
+    for (int i = 0; i < str.size(); i++) 
+        input_state.validate_and_add(str[i]);
 	refresh_input_flag = true;
 }
 
@@ -154,13 +179,14 @@ void handle_flags() {
 	}
 
 	if (refresh_input_flag) {
-		render_lcd(input);
+		render_lcd(input_state.current_input);
 		refresh_input_flag = false;
 	}
-
+#ifndef F429
 	if (evaluated_flag) {
 		check_decimal_points_change();
 	}
+#endif
 }
 
 void setup() {
@@ -173,8 +199,10 @@ void setup() {
 	serial_port.sigio([] { read_flag = true; });
 
 	// controls for using previous result
-	joystick_up.fall([] { store_result(); });
+#ifndef F429
+    joystick_up.fall([] { store_result(); });
 	joystick_down.fall([] { use_result(); });
+#endif
 
 	// initial message
 	lcd.printf("Type an expression:");
@@ -191,15 +219,21 @@ void loop() {
 	serial_port.read(&c, 1);
 	idle_timeout.attach([] { clear_flag = true; }, IDLE_TIMEOUT_CLEAR_DURATION);
 
-	if (is_expression_input(c) && is_valid_partial_expression(input, c)) {
-		handle_input(c);
+    auto next_expr_state = input_state.validate_and_add(c);
+
+	if (next_expr_state != ExpressionState::INVALID_EXPRESSION) {
+        handle_input(c);
+        expr_state = next_expr_state;
 	} else switch (c) {
 		case ENTER:
 		case RETURN: enter(); break;
 		case BACKSPACE: backspace(); break;
-//      case UP: store_result(); break; // was used to test without lcd
-//      case DOWN: use_result(); break;
-		case RESET:
+        
+#ifdef ECEN449_DEBUG
+        case UP: store_result(); break; // was used to test without lcd
+        case DOWN: use_result(); break;
+#endif
+        case RESET:
 			clear_screen();
 			break;
 		default:

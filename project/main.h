@@ -10,8 +10,8 @@
 #define MAX_INPUT (MAX_LINE * 2)
 #define MAX_DECIMALS 7
 #define BACKSPACE 127
-// #define UP 'w'
-// #define DOWN 's'
+#define UP 'w'
+#define DOWN 's'
 #define RESET 'z'
 #define IDLE_TIMEOUT_CLEAR_DURATION 60s
 
