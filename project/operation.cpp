@@ -1,12 +1,7 @@
 #include "operation.h"
 #include <string>
-#include <cstring>
-#include <iostream>
 #include <cmath>
 #include <map>
-#include <regex>
-#include <set>
-#include <stack>
 
 using namespace std;
 
@@ -24,18 +19,12 @@ Operation map_operator(char op)
 {
 	switch (op)
 	{
-	case '+':
-		return Operation::Add;
-	case '-':
-		return Operation::Subtract;
-	case '*':
-		return Operation::Multiply;
-	case '/':
-		return Operation::Divide;
-	case '^':
-        return Operation::Exponentiate;
-	default:
-		return Operation::None;
+	case '+': return Operation::Add;
+	case '-': return Operation::Subtract;
+	case '*': return Operation::Multiply;
+	case '/': return Operation::Divide;
+	case '^': return Operation::Exponentiate;
+	default:  return Operation::None;
 	}
 }
 
@@ -176,24 +165,7 @@ double evaluate(std::string expression)
 		else if (expression[i] == ')')
         {
             while (!operators.empty() && operators.top() != Operation::None)
-            {
-                Operation op = operators.top();
-                operators.pop();
-
-                ExpressionNode* node = new ExpressionNode();
-                node->op = op;
-
-                if (precedence(op))
-                {                    
-			        node->right = nullptr;
-                }
-                else
-                {
-                    node->right = operands.top(); operands.pop();
-                }
-                node->left = operands.top(); operands.pop();
-                operands.push(node);
-            }
+                push_node();
             if (!operators.empty()) operators.pop();  // pop the '(' marker
         }
 		else
@@ -232,14 +204,12 @@ double apply_operation(double a, double b, Operation op)
 	case Operation::Add: return a + b;
 	case Operation::Subtract: return a - b;
 	case Operation::Multiply: return a * b;
-	case Operation::Divide: return a / b;
+	case Operation::Divide: return b == 0 ? NAN : a / b;
 	case Operation::Exponentiate: return pow(a, b);
 	case Operation::Sin: return sin(a);
 	case Operation::Cos: return cos(a);
-	case Operation::Tan: return tan(a);
-	case Operation::Sqrt:
-        if (a < 0) return NAN;
-        return sqrt(a);
+	case Operation::Tan: return isinf(tan(a)) ? NAN : tan(a);
+	case Operation::Sqrt: a < 0 ? NAN : sqrt(a);
 	default: return a;
 	}
 }

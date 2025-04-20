@@ -8,8 +8,8 @@
 #include <string>
 #include <sstream>
 
-#define ECEN449_DEBUG // enable to see output on the serial monitor as well
-#define F429 // the other board used to test this code
+// #define ECEN449_DEBUG // enable to see output on the serial monitor as well
+// #define F429 // the other board used to test this code
 
 // pin mappings
 C12832 lcd(D11, D13, D12, D7, D10); // the LCD panel
@@ -45,7 +45,7 @@ bool invalid_flag = false;
 int decimal_points = 2; // decimal_points to display
 float last_pot_value = 0.0f; // used to stablize the readings
 
-// renders the input and result (if available)
+// renders the input (and result if available)
 void render_lcd(string current_input) {
 	lcd.cls(); // clear screen
 	lcd.locate(0, 3); // change cursor
@@ -74,7 +74,7 @@ void display_result() {
 
 // shows yellow if max input reached
 void check_input_alert() {
-	rgb_led = input_state.length() == MAX_INPUT ? 0b100 : 0b111;
+	rgb_led = input_state.length() == MAX_INPUT - 1 ? 0b100 : 0b111;
 }
 
 // blinks on invalid input
@@ -87,9 +87,9 @@ void blink_invalid() {
 
 void check_decimal_points_change() {
     float current_value = pot.read();
-    const float threshold = 0.05f; // adjust this based on your noise profile
+    const float threshold = 0.05f;
 
-    if (fabs(current_value - last_pot_value) < threshold)
+    if (fabs(current_value - last_pot_value) < threshold) // mechanism to minimize noise
         return;
 
     last_pot_value = current_value;
@@ -103,14 +103,20 @@ void check_decimal_points_change() {
 
 void handle_input(char c) {
 	evaluated_flag = false;
-	if (input_state.length() < MAX_INPUT) {
-		render_lcd(input_state.current_input);
-	} else {
-        input_state.backspace();
+
+    if (input_state.validate_and_add(c) != ExpressionState::INVALID_EXPRESSION) {
+        if (input_state.length() < MAX_INPUT) {
+    		render_lcd(input_state.current_input);
+        } else {
+            input_state.backspace();
+        }
+    } else {
+        invalid_flag = true;
     }
 	check_input_alert();
 }
 
+// on press backspace
 void backspace() {
 	evaluated_flag = false;
 	if (input_state.length() > 0) {
@@ -120,46 +126,55 @@ void backspace() {
 	check_input_alert();
 }
 
+// on press enter
 void enter() {
-	if (input_state.length() > 0) {
-		result = evaluate(input_state.current_input);
-		if (isnan(result)) {
+	if (input_state.length() > 0 && input_state.current_expression_state == ExpressionState::VALID_EXPRESSION) {
+		// evaluate only for a valid input
+        result = evaluate(input_state.current_input);
+		if (isnan(result) || isinf(result)) {
 			invalid_expression();
 		} else {
 			evaluated_flag = true;
 			render_lcd(input_state.current_input);
 			previous_input = input_state.current_input;
 		}
-	}
-	input_state.clear();
+    	input_state.clear();
+	} else {
+        invalid_flag = true;
+    }
 	check_input_alert();
 }
 
+// clears the screen and input
 void clear_screen() {
 	input_state.clear();
 	evaluated_flag = false;
-	render_lcd(input_state.current_input);
+    lcd.cls();
+	lcd.printf("Type an expression:");
 }
 
+// stores result
 void store_result() {
-	if (evaluated_flag) {
-		stored_result = result;
-		stored_flag = true;
-	}
+	if (!evaluated_flag) return;
+
+    stored_result = result;
+    stored_flag = true;
 }
 
+// uses stored result
 void use_result() {
 	if (!stored_flag) return;
 
+	stored_flag = false;
 	stringstream ss;
 	ss << input_state.current_input << stored_result;
-	stored_flag = false;
     string str = ss.str();
     for (int i = 0; i < str.size(); i++) 
         input_state.validate_and_add(str[i]);
 	refresh_input_flag = true;
 }
 
+// display message to user
 void invalid_expression() {
 	lcd.cls();
 	lcd.locate(0, 3);
@@ -167,6 +182,7 @@ void invalid_expression() {
 	printf("Invalid input or math error\n");
 }
 
+// all flag handlers are processed here
 void handle_flags() {
 	if (invalid_flag) {
 		blink_invalid();
@@ -219,12 +235,7 @@ void loop() {
 	serial_port.read(&c, 1);
 	idle_timeout.attach([] { clear_flag = true; }, IDLE_TIMEOUT_CLEAR_DURATION);
 
-    auto next_expr_state = input_state.validate_and_add(c);
-
-	if (next_expr_state != ExpressionState::INVALID_EXPRESSION) {
-        handle_input(c);
-        expr_state = next_expr_state;
-	} else switch (c) {
+    switch (c) {
 		case ENTER:
 		case RETURN: enter(); break;
 		case BACKSPACE: backspace(); break;
@@ -233,14 +244,10 @@ void loop() {
         case UP: store_result(); break; // was used to test without lcd
         case DOWN: use_result(); break;
 #endif
-        case RESET:
-			clear_screen();
-			break;
-		default:
-			invalid_flag = true;
-			evaluated_flag = false;
-			break;
-		}
+
+        case RESET: clear_screen(); break;
+		default: handle_input(c); break;
+    } 
 }
 
 int main() {

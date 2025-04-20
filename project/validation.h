@@ -38,27 +38,31 @@ enum InputStatus {
 class InputState
 {
 private:
-	std::stack<int> previous_states;
-	std::stack<std::string> previous_strings;
+    // constants
+    static const std::string binary_operators;
+    static const std::set<std::string> functions;
+    static const std::set<std::string> constants;
+    static const std::string function_letters;
+    static const std::string constant_letters;
+    static const std::string letters;
 
 	int current_state = NEW_EXPRESSION;
 	std::string current_string;
 	int bracket_stack = 0;
 
-	const std::string binary_operators = "+*/^";
-	const std::set<std::string> functions = { "sin", "cos", "tan", "sqrt" };
-	const std::set<std::string> constants = { "pi" };
-
-	const std::string function_letters = std::accumulate(functions.begin(), functions.end(), std::string{});
-	const std::string constant_letters = std::accumulate(constants.begin(), constants.end(), std::string{});
-	const std::string letters = function_letters + constant_letters;
+    // stacks for backtracking
+	std::stack<int> previous_states;
+	std::stack<std::string> previous_strings;
+    std::stack<ExpressionState> previous_expression_states;
 
 	InputType get_input_type(char c);
 	void push_new_state(int new_state, bool right_bracket = false);
 	void push_new_string(const std::string& old_string, char c, bool clear = true);
+    ExpressionState set_expression_state(ExpressionState next);
 
 public:
 	std::string current_input;
+    ExpressionState current_expression_state = ExpressionState::PARTIALLY_VALID_EXPRESSION;
 	void backspace();
 	ExpressionState validate_and_add(char c);
 	int length();

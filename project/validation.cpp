@@ -8,6 +8,17 @@
 
 using namespace std;
 
+const string InputState::binary_operators = "+*/^";
+const set<string> InputState::functions = { "sin", "cos", "tan", "sqrt" };
+
+const std::set<std::string> InputState::constants = { "pi" };
+
+const std::string InputState::function_letters = std::accumulate(InputState::functions.begin(), InputState::functions.end(), std::string{});
+
+const std::string InputState::constant_letters = std::accumulate(InputState::constants.begin(), InputState::constants.end(), std::string{});
+
+const std::string InputState::letters = InputState::function_letters + InputState::constant_letters;
+
 InputType InputState::get_input_type(const char c)
 {
 	if (isdigit(c)) return NUMBER;
@@ -43,6 +54,9 @@ void InputState::backspace()
 	current_state = previous_states.top();
 	previous_states.pop();
 
+    current_expression_state = previous_expression_states.top();
+    previous_expression_states.pop();
+
 	if (!current_string.empty())
 	{
 		current_string.pop_back();
@@ -69,7 +83,7 @@ ExpressionState InputState::validate_and_add(const char c)
 			push_new_state(current_state, true);
 		else if (current_state == NUMBER_DOT_START) push_new_state(NUMBER_DOT_MIDDLE, true);
 
-		return ExpressionState::VALID_EXPRESSION;
+		return set_expression_state(ExpressionState::VALID_EXPRESSION);
 	}
 	else if (input_type == DOT)
 	{
@@ -77,12 +91,12 @@ ExpressionState InputState::validate_and_add(const char c)
 		if ((current_state | MINUS) == NEW_EXPRESSION)
 		{
 			push_new_state(NUMBER_DOT_START);
-			return ExpressionState::PARTIALLY_VALID_EXPRESSION;
+			return set_expression_state(ExpressionState::PARTIALLY_VALID_EXPRESSION);
 		}
 		if ((current_state | MINUS) == (NUMBER_NO_DOT & ~(RIGHT_BRACKET * (bracket_stack == 0))))
 		{
 			push_new_state(NUMBER_DOT_MIDDLE, true);
-			return ExpressionState::VALID_EXPRESSION;
+			return set_expression_state(ExpressionState::VALID_EXPRESSION);
 		}
 	}
 	else if (input_type == LEFT_BRACKET)
@@ -90,7 +104,7 @@ ExpressionState InputState::validate_and_add(const char c)
 		bracket_stack++;
 		push_new_state(NEW_EXPRESSION, true);
 		current_input += c;
-		return ExpressionState::PARTIALLY_VALID_EXPRESSION;
+		return set_expression_state(ExpressionState::PARTIALLY_VALID_EXPRESSION);
 	}
 	else if (input_type == RIGHT_BRACKET)
 	{
@@ -98,7 +112,7 @@ ExpressionState InputState::validate_and_add(const char c)
 		bracket_stack--;
 		push_new_state(CONSTANT_MATCH_OR_EXPRESSION_FINISH, true);
 		current_input += c;
-		return ExpressionState::VALID_EXPRESSION;
+		return set_expression_state(ExpressionState::VALID_EXPRESSION);
 	}
 	else if (input_type == STRING)
 	{
@@ -122,7 +136,7 @@ ExpressionState InputState::validate_and_add(const char c)
 			push_new_state(CONSTANT_MATCH_OR_EXPRESSION_FINISH);
 			push_new_string(current_string, c);
 			current_input += c;
-			return ExpressionState::VALID_EXPRESSION;
+			return set_expression_state(ExpressionState::VALID_EXPRESSION);
 		}
 		else if (any_of(functions.begin(), functions.end(), is_part_of_function)
 				 || any_of(constants.begin(), constants.end(), is_part_of_constant))
@@ -132,17 +146,22 @@ ExpressionState InputState::validate_and_add(const char c)
 		}
 		else return ExpressionState::INVALID_EXPRESSION;
 		current_input += c;
-		return ExpressionState::PARTIALLY_VALID_EXPRESSION;
+		return set_expression_state(ExpressionState::PARTIALLY_VALID_EXPRESSION);
 	}
 	else if (input_type & OPERATOR)
 	{
 		current_input += c;
 		push_new_state(NEW_EXPRESSION & ~(MINUS * (input_type == MINUS)));
-		return ExpressionState::PARTIALLY_VALID_EXPRESSION;
+		return set_expression_state(ExpressionState::PARTIALLY_VALID_EXPRESSION);
 	}
 
 	printf("Should not be here: %c\n", c);
 	return ExpressionState::INVALID_EXPRESSION;
+}
+
+ExpressionState InputState::set_expression_state(ExpressionState next) {
+    previous_expression_states.push(current_expression_state);
+    return current_expression_state = next;
 }
 
 int InputState::length() {
